@@ -67,17 +67,10 @@ pub async fn reconcile(
     sasgen: Arc<SasGenerator>,
     ctx: Arc<ContextData>,
 ) -> Result<Action, ReconcileError> {
-    let target_secret = sasgen.target_secret_name();
-    let labels = sasgen.secret_labels();
-    let annotations = sasgen.secret_annotations();
-
     sasgen.log_spec();
 
     let now = OffsetDateTime::now_utc();
-    let renewal_hours = sasgen
-        .spec
-        .sas_renewal_hours
-        .unwrap_or(ctx.sas_renewal_hours);
+    let renewal_hours = sasgen.spec.sas_renewal_hours.unwrap_or(ctx.sas_renewal_hours);
     let ttl_hours = sasgen.spec.sas_ttl_hours.unwrap_or(ctx.sas_ttl_hours);
 
     if should_regenerate(now, &sasgen.status, renewal_hours) {
@@ -90,12 +83,16 @@ pub async fn reconcile(
         .await
         .map_err(|e| ReconcileError::Azure(e.to_string()))?;
 
-        info!(new_expiry = %token_info.expiry, "Generated new SAS token");
-
+        let target_secret = sasgen.target_secret_name(None);
         let new_status = build_status(token_info, &target_secret);
 
-        update_crd_status(&sasgen, &ctx, new_status.clone()).await?;
+        info!(new_expiry = %new_status.expiry.as_deref().unwrap_or_default(), "Generated new SAS token");
+
+        let labels = sasgen.secret_labels();
+        let annotations = sasgen.secret_annotations(Some(&new_status));
+
         ensure_secret(&sasgen, &ctx, &target_secret, labels, annotations).await?;
+        update_crd_status(&sasgen, &ctx, new_status.clone()).await?;
     }
 
     Ok(Action::requeue(std::time::Duration::from_secs(15)))

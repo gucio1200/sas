@@ -52,26 +52,29 @@ impl ContextData {
 }
 
 impl SasGenerator {
-    /// Resolves the secret name to use: CR-provided override or default computed from storage/container
     #[instrument(skip(self))]
-    pub fn target_secret_name(&self) -> String {
-        match &self.spec.secret_name {
+    pub fn target_secret_name(&self, override_name: Option<&str>) -> String {
+        let result = match override_name {
             Some(name) => {
-                debug!(%name, "Using secret_name provided in CR spec");
-                name.clone()
+                debug!(%name, "Using override name for secret");
+                name.to_string()
             }
-            None => {
-                let default_name = format!(
-                    "volsync-{}-{}",
-                    self.spec.storage_account, self.spec.container_name
-                );
-                debug!(target_secret = %default_name, "Computed default target Secret name");
-                default_name
-            }
-        }
+            None => match &self.spec.secret_name {
+                Some(name) => {
+                    debug!(%name, "Using secret_name from CR spec");
+                    name.clone()
+                }
+                None => {
+                    let default_name =
+                        format!("volsync-{}-{}", self.spec.storage_account, self.spec.container_name);
+                    debug!(target_secret = %default_name, "Computed default secret name");
+                    default_name
+                }
+            },
+        };
+        result
     }
 
-    /// Returns labels for the secret based on the spec
     pub fn secret_labels(&self) -> std::collections::BTreeMap<String, String> {
         std::collections::BTreeMap::from([
             (
@@ -85,9 +88,8 @@ impl SasGenerator {
         ])
     }
 
-    /// Returns annotations for the secret based on status
-    pub fn secret_annotations(&self) -> std::collections::BTreeMap<String, String> {
-        let status = self.status.clone().unwrap_or_default();
+    pub fn secret_annotations(&self, status_override: Option<&SasGeneratorStatus>) -> std::collections::BTreeMap<String, String> {
+        let status = status_override.cloned().unwrap_or_else(|| self.status.clone().unwrap_or_default());
         std::collections::BTreeMap::from([
             (
                 "sas.azure.com/generated".into(),
@@ -100,10 +102,9 @@ impl SasGenerator {
         ])
     }
 
-    /// Logs the CR spec and resolved secret
     pub fn log_spec(&self) {
         let cr_name = self.name_any();
-        let target_secret = self.target_secret_name();
+        let target_secret = self.target_secret_name(None);
         let token_present = self
             .status
             .as_ref()
