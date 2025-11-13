@@ -1,0 +1,8 @@
+apiVersion: sas.azure.com/v1alpha1
+kind: SasGenerator
+metadata:
+  name: my-sas-generator
+  namespace: default
+spec:
+  account: "test_account"
+  container: "test_container"
