@@ -4,5 +4,5 @@ metadata:
   name: my-sas-generator
   namespace: default
 spec:
-  account: "test_account"
-  container: "test_container"
+  containerName: "test_account"
+  storageAccount: "test_container"

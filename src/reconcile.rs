@@ -4,7 +4,6 @@ use crate::secret::ensure_secret;
 use crate::status::update_crd_status;
 use crate::utils::format_rfc3339;
 use kube::runtime::controller::Action;
-use kube::ResourceExt;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
@@ -45,20 +44,33 @@ fn should_regenerate(
         })
 }
 
-fn build_status(token_info: SasTokenInfo, sasgen: &SasGenerator) -> SasGeneratorStatus {
+fn build_status(token_info: SasTokenInfo, secret_name: &str) -> SasGeneratorStatus {
     SasGeneratorStatus {
         token: Some(token_info.token),
-        target_secret: Some(sasgen.target_secret_name()),
+        target_secret: Some(secret_name.to_string()),
         generated: Some(format_rfc3339(token_info.generated)),
         expiry: Some(format_rfc3339(token_info.expiry)),
     }
 }
 
-#[instrument(skip_all, fields(cr_name = %sasgen.name_any()))]
+pub fn error_policy(
+    _obj: Arc<SasGenerator>,
+    err: &ReconcileError,
+    _ctx: Arc<ContextData>,
+) -> Action {
+    error!(?err, "Reconcile failed");
+    Action::requeue(StdDuration::from_secs(300))
+}
+
+#[instrument(skip_all)]
 pub async fn reconcile(
     sasgen: Arc<SasGenerator>,
     ctx: Arc<ContextData>,
 ) -> Result<Action, ReconcileError> {
+    let target_secret = sasgen.target_secret_name();
+    let labels = sasgen.secret_labels();
+    let annotations = sasgen.secret_annotations();
+
     sasgen.log_spec();
 
     let now = OffsetDateTime::now_utc();
@@ -80,20 +92,11 @@ pub async fn reconcile(
 
         info!(new_expiry = %token_info.expiry, "Generated new SAS token");
 
-        let new_status = build_status(token_info, &sasgen);
+        let new_status = build_status(token_info, &target_secret);
 
         update_crd_status(&sasgen, &ctx, new_status.clone()).await?;
-        ensure_secret(&sasgen, &ctx).await?;
+        ensure_secret(&sasgen, &ctx, &target_secret, labels, annotations).await?;
     }
 
-    Ok(Action::requeue(StdDuration::from_secs(15)))
-}
-
-pub fn error_policy(
-    _obj: Arc<SasGenerator>,
-    err: &ReconcileError,
-    _ctx: Arc<ContextData>,
-) -> Action {
-    error!(?err, "Reconcile failed");
-    Action::requeue(StdDuration::from_secs(300))
+    Ok(Action::requeue(std::time::Duration::from_secs(15)))
 }

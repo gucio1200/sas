@@ -1,0 +1,62 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: sasgenerators.sas.azure.com
+spec:
+  group: sas.azure.com
+  names:
+    categories: []
+    kind: SasGenerator
+    plural: sasgenerators
+    shortNames: []
+    singular: sasgenerator
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for SasGeneratorSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              containerName:
+                type: string
+              sasRenewalHours:
+                format: int64
+                nullable: true
+                type: integer
+              sasTtlHours:
+                format: int64
+                nullable: true
+                type: integer
+              storageAccount:
+                type: string
+            required:
+            - containerName
+            - storageAccount
+            type: object
+          status:
+            nullable: true
+            properties:
+              expiry:
+                nullable: true
+                type: string
+              generated:
+                nullable: true
+                type: string
+              targetSecret:
+                nullable: true
+                type: string
+              token:
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: SasGenerator
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

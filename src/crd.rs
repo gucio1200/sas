@@ -1,13 +1,12 @@
-use kube::ResourceExt;
-use kube::{CustomResource, CustomResourceExt};
+use kube::{CustomResource, CustomResourceExt, ResourceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
 
 #[derive(CustomResource, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[kube(
-    group = "sas.example.com",
-    version = "v1",
+    group = "sas.azure.com",
+    version = "v1alpha1",
     kind = "SasGenerator",
     namespaced,
     status = "SasGeneratorStatus"
@@ -16,6 +15,7 @@ use tracing::{debug, info, instrument};
 pub struct SasGeneratorSpec {
     pub storage_account: String,
     pub container_name: String,
+    pub secret_name: Option<String>,
     pub sas_ttl_hours: Option<i64>,
     pub sas_renewal_hours: Option<i64>,
 }
@@ -52,29 +52,57 @@ impl ContextData {
 }
 
 impl SasGenerator {
+    /// Resolves the secret name to use: CR-provided override or default computed from storage/container
     #[instrument(skip(self))]
     pub fn target_secret_name(&self) -> String {
-        let name = self
-            .status
-            .as_ref()
-            .and_then(|s| s.target_secret.clone())
-            .unwrap_or_else(|| {
-                let generated_name = format!(
+        match &self.spec.secret_name {
+            Some(name) => {
+                debug!(%name, "Using secret_name provided in CR spec");
+                name.clone()
+            }
+            None => {
+                let default_name = format!(
                     "volsync-{}-{}",
                     self.spec.storage_account, self.spec.container_name
                 );
-                debug!(
-                    ?generated_name,
-                    "Target Secret name not set in status — computed automatically"
-                );
-                generated_name
-            });
-
-        debug!(target_secret = %name, "Resolved target Secret name");
-        name
+                debug!(target_secret = %default_name, "Computed default target Secret name");
+                default_name
+            }
+        }
     }
 
+    /// Returns labels for the secret based on the spec
+    pub fn secret_labels(&self) -> std::collections::BTreeMap<String, String> {
+        std::collections::BTreeMap::from([
+            (
+                "sas.azure.com/account".into(),
+                self.spec.storage_account.clone(),
+            ),
+            (
+                "sas.azure.com/container".into(),
+                self.spec.container_name.clone(),
+            ),
+        ])
+    }
+
+    /// Returns annotations for the secret based on status
+    pub fn secret_annotations(&self) -> std::collections::BTreeMap<String, String> {
+        let status = self.status.clone().unwrap_or_default();
+        std::collections::BTreeMap::from([
+            (
+                "sas.azure.com/generated".into(),
+                status.generated.unwrap_or_default(),
+            ),
+            (
+                "sas.azure.com/expires".into(),
+                status.expiry.unwrap_or_default(),
+            ),
+        ])
+    }
+
+    /// Logs the CR spec and resolved secret
     pub fn log_spec(&self) {
+        let cr_name = self.name_any();
         let target_secret = self.target_secret_name();
         let token_present = self
             .status
@@ -84,7 +112,7 @@ impl SasGenerator {
         let expiry = self.status.as_ref().and_then(|s| s.expiry.as_ref());
 
         info!(
-            crd = %self.name_any(),
+            crd = %cr_name,
             account = %self.spec.storage_account,
             container = %self.spec.container_name,
             ttl = ?self.spec.sas_ttl_hours,
