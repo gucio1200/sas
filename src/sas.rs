@@ -42,11 +42,11 @@ pub async fn generate_container_sas(
     let start = now - Duration::seconds(5);
     let expiry = now + Duration::hours(expiry_hours);
 
-    info!("Starting SAS token generation");
+    info!("Starting SAS token generation for container");
 
     let credential =
         create_credential().context("Failed to create Azure DefaultAzureCredential")?;
-    debug!("Azure DefaultAzureCredential created successfully");
+    debug!("Azure DefaultAzureCredential initialized successfully");
 
     let storage_credentials = azure_storage::StorageCredentials::token_credential(credential);
     let service_client = BlobServiceClient::new(account.to_string(), storage_credentials);
@@ -58,16 +58,19 @@ pub async fn generate_container_sas(
         .take(5)
         .map(jitter);
 
-    debug!("Starting SAS generation with retry strategy");
+    debug!(
+        max_retries = 5,
+        "Attempting SAS generation with exponential backoff"
+    );
 
     let sas_token = Retry::spawn(retry_strategy, || async {
         match generate_client(&container_client, start, expiry).await {
             Ok(token) => {
-                info!("SAS token generated successfully");
+                info!("SAS token generated successfully on this attempt");
                 Ok(token)
             }
             Err(e) => {
-                warn!(?e, "SAS generation failed; retrying...");
+                warn!(error = ?e, "SAS generation attempt failed; retrying...");
                 Err(e)
             }
         }
@@ -75,7 +78,13 @@ pub async fn generate_container_sas(
     .await
     .context("Failed to generate SAS token after retries")?;
 
-    info!(expiry = %expiry, "SAS token generation completed successfully");
+    info!(
+        %account,
+        %container,
+        expiry = %expiry,
+        "SAS token generation completed successfully"
+    );
+
     Ok(SasTokenInfo {
         token: sas_token,
         expiry,
@@ -83,14 +92,14 @@ pub async fn generate_container_sas(
     })
 }
 
-#[instrument(skip_all)]
+#[instrument]
 fn create_credential() -> Result<Arc<DefaultAzureCredential>> {
-    debug!("Creating DefaultAzureCredential (auto-detects environment, managed identity, or workload identity)");
+    debug!("Initializing DefaultAzureCredential (supports env vars, managed identity, workload identity)");
 
     let credential = DefaultAzureCredential::create(TokenCredentialOptions::default())
         .context("Failed to initialize DefaultAzureCredential")?;
 
-    debug!("Azure DefaultAzureCredential initialized successfully");
+    info!("DefaultAzureCredential created successfully");
     Ok(Arc::new(credential))
 }
 
@@ -100,15 +109,21 @@ async fn generate_client(
     start: OffsetDateTime,
     expiry: OffsetDateTime,
 ) -> Result<String> {
-    debug!("Generating SAS token for container");
+    debug!("Requesting user delegation key from Azure Storage");
 
-    debug!("Fetching user delegation key");
     let user_delegation_key = container_client
         .service_client()
         .get_user_deligation_key(start, expiry)
         .await
         .context("Failed to fetch user delegation key")?;
-    debug!("User delegation key fetched successfully");
+
+    info!("User delegation key fetched successfully");
+
+    debug!(
+        start = %start,
+        expiry = %expiry,
+        "Generating SAS token using delegation key and predefined permissions"
+    );
 
     let client = container_client
         .user_delegation_shared_access_signature(
@@ -118,6 +133,10 @@ async fn generate_client(
         .await
         .context("Failed to generate SAS token")?;
 
-    info!("SAS token successfully generated");
+    info!(
+        container = %container_client.container_name(),
+        "SAS token generated successfully"
+    );
+
     Ok(client.token()?)
 }

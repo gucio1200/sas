@@ -2,12 +2,13 @@ use crate::crd::{ContextData, SasGenerator, SasGeneratorStatus};
 use crate::sas::{generate_container_sas, SasTokenInfo};
 use crate::secret::ensure_secret;
 use crate::status::update_crd_status;
+use crate::utils::format_rfc3339;
 use kube::runtime::controller::Action;
 use kube::ResourceExt;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReconcileError {
@@ -21,7 +22,6 @@ pub enum ReconcileError {
     CrdApply(String),
 }
 
-/// Returns true if the SAS token should be regenerated
 fn should_regenerate(
     now: OffsetDateTime,
     status: &Option<SasGeneratorStatus>,
@@ -31,24 +31,24 @@ fn should_regenerate(
         .as_ref()
         .and_then(|s| s.expiry.as_ref())
         .map_or(true, |expiry| {
-            let parsed =
-                OffsetDateTime::parse(expiry, &time::format_description::well_known::Rfc3339)
-                    .unwrap_or(now);
-            now >= (parsed - Duration::hours(renewal_hours))
+            match OffsetDateTime::parse(expiry, &time::format_description::well_known::Rfc3339) {
+                Ok(parsed) => now >= (parsed - Duration::hours(renewal_hours)),
+                Err(e) => {
+                    warn!(
+                        ?expiry,
+                        ?e,
+                        "Failed to parse expiry; will regenerate SAS token"
+                    );
+                    true
+                }
+            }
         })
 }
 
-/// Safely format OffsetDateTime to RFC3339 string
-fn format_rfc3339(dt: OffsetDateTime) -> String {
-    dt.format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
-}
-
-/// Build a new SasGeneratorStatus from SAS token info and CRD
 fn build_status(token_info: SasTokenInfo, sasgen: &SasGenerator) -> SasGeneratorStatus {
     SasGeneratorStatus {
         token: Some(token_info.token),
-        target_secret: Some(sasgen.target_secret_name()), // centralized single source
+        target_secret: Some(sasgen.target_secret_name()),
         generated: Some(format_rfc3339(token_info.generated)),
         expiry: Some(format_rfc3339(token_info.expiry)),
     }
@@ -59,12 +59,14 @@ pub async fn reconcile(
     sasgen: Arc<SasGenerator>,
     ctx: Arc<ContextData>,
 ) -> Result<Action, ReconcileError> {
+    sasgen.log_spec();
+
+    let now = OffsetDateTime::now_utc();
     let renewal_hours = sasgen
         .spec
         .sas_renewal_hours
         .unwrap_or(ctx.sas_renewal_hours);
     let ttl_hours = sasgen.spec.sas_ttl_hours.unwrap_or(ctx.sas_ttl_hours);
-    let now = OffsetDateTime::now_utc();
 
     if should_regenerate(now, &sasgen.status, renewal_hours) {
         let token_info = generate_container_sas(
@@ -80,7 +82,6 @@ pub async fn reconcile(
 
         let new_status = build_status(token_info, &sasgen);
 
-        // Apply status and ensure secret
         update_crd_status(&sasgen, &ctx, new_status.clone()).await?;
         ensure_secret(&sasgen, &ctx).await?;
     }
