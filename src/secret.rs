@@ -20,7 +20,6 @@ pub async fn ensure_secret(
 
     let api: Api<Secret> = Api::namespaced(ctx.client.clone(), &ns);
 
-    // Use the override if provided, otherwise fall back to CRD status
     let status = status_override
         .cloned()
         .unwrap_or_else(|| sasgen.status.clone().unwrap_or_default());
@@ -66,4 +65,3 @@ pub async fn ensure_secret(
 
     Ok(())
 }
-

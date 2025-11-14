@@ -65,8 +65,10 @@ impl SasGenerator {
                     name.clone()
                 }
                 None => {
-                    let default_name =
-                        format!("volsync-{}-{}", self.spec.storage_account, self.spec.container_name);
+                    let default_name = format!(
+                        "volsync-{}-{}",
+                        self.spec.storage_account, self.spec.container_name
+                    );
                     debug!(target_secret = %default_name, "Computed default secret name");
                     default_name
                 }
@@ -88,8 +90,13 @@ impl SasGenerator {
         ])
     }
 
-    pub fn secret_annotations(&self, status_override: Option<&SasGeneratorStatus>) -> std::collections::BTreeMap<String, String> {
-        let status = status_override.cloned().unwrap_or_else(|| self.status.clone().unwrap_or_default());
+    pub fn secret_annotations(
+        &self,
+        status_override: Option<&SasGeneratorStatus>,
+    ) -> std::collections::BTreeMap<String, String> {
+        let status = status_override
+            .cloned()
+            .unwrap_or_else(|| self.status.clone().unwrap_or_default());
         std::collections::BTreeMap::from([
             (
                 "sas.azure.com/generated".into(),
@@ -130,7 +137,6 @@ impl SasGenerator {
 pub fn generate_crd() -> Result<(), Box<dyn std::error::Error>> {
     let crd = SasGenerator::crd();
     let yaml = serde_yaml::to_string(&crd)?;
-    std::fs::write("crd.yaml", yaml)?;
-    info!("CRD YAML generated successfully at crd.yaml");
+    println!("{}", yaml);
     Ok(())
 }

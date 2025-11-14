@@ -70,11 +70,13 @@ pub async fn reconcile(
     sasgen.log_spec();
 
     let now = OffsetDateTime::now_utc();
-    let renewal_hours = sasgen.spec.sas_renewal_hours.unwrap_or(ctx.sas_renewal_hours);
+    let renewal_hours = sasgen
+        .spec
+        .sas_renewal_hours
+        .unwrap_or(ctx.sas_renewal_hours);
     let ttl_hours = sasgen.spec.sas_ttl_hours.unwrap_or(ctx.sas_ttl_hours);
 
     if should_regenerate(now, &sasgen.status, renewal_hours) {
-        // Generate new SAS token
         let token_info = generate_container_sas(
             &sasgen.spec.storage_account,
             &sasgen.spec.container_name,
@@ -92,10 +94,8 @@ pub async fn reconcile(
             "Generated new SAS token"
         );
 
-        // Update CRD status first
         update_crd_status(&sasgen, &ctx, new_status.clone()).await?;
 
-        // Ensure secret with the fresh token
         let labels = sasgen.secret_labels();
         let annotations = sasgen.secret_annotations(Some(&new_status));
         ensure_secret(
@@ -104,7 +104,7 @@ pub async fn reconcile(
             &target_secret,
             labels,
             annotations,
-            Some(&new_status), // <--- pass the new status
+            Some(&new_status),
         )
         .await?;
     }
