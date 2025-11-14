@@ -74,6 +74,7 @@ pub async fn reconcile(
     let ttl_hours = sasgen.spec.sas_ttl_hours.unwrap_or(ctx.sas_ttl_hours);
 
     if should_regenerate(now, &sasgen.status, renewal_hours) {
+        // Generate new SAS token
         let token_info = generate_container_sas(
             &sasgen.spec.storage_account,
             &sasgen.spec.container_name,
@@ -86,13 +87,26 @@ pub async fn reconcile(
         let target_secret = sasgen.target_secret_name(None);
         let new_status = build_status(token_info, &target_secret);
 
-        info!(new_expiry = %new_status.expiry.as_deref().unwrap_or_default(), "Generated new SAS token");
+        info!(
+            new_expiry = %new_status.expiry.as_deref().unwrap_or_default(),
+            "Generated new SAS token"
+        );
 
+        // Update CRD status first
+        update_crd_status(&sasgen, &ctx, new_status.clone()).await?;
+
+        // Ensure secret with the fresh token
         let labels = sasgen.secret_labels();
         let annotations = sasgen.secret_annotations(Some(&new_status));
-
-        ensure_secret(&sasgen, &ctx, &target_secret, labels, annotations).await?;
-        update_crd_status(&sasgen, &ctx, new_status.clone()).await?;
+        ensure_secret(
+            &sasgen,
+            &ctx,
+            &target_secret,
+            labels,
+            annotations,
+            Some(&new_status), // <--- pass the new status
+        )
+        .await?;
     }
 
     Ok(Action::requeue(std::time::Duration::from_secs(15)))

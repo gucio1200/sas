@@ -1,4 +1,4 @@
-use crate::crd::{ContextData, SasGenerator};
+use crate::crd::{ContextData, SasGenerator, SasGeneratorStatus};
 use crate::reconcile::ReconcileError;
 use k8s_openapi::api::core::v1::Secret;
 use kube::api::{Patch, PatchParams};
@@ -13,12 +13,17 @@ pub async fn ensure_secret(
     secret_name: &str,
     labels: BTreeMap<String, String>,
     annotations: BTreeMap<String, String>,
+    status_override: Option<&SasGeneratorStatus>,
 ) -> Result<(), ReconcileError> {
     let ns = sasgen.namespace().unwrap_or_else(|| "default".into());
     info!(%secret_name, %ns, "Ensuring Secret exists or is up to date");
 
     let api: Api<Secret> = Api::namespaced(ctx.client.clone(), &ns);
-    let status = sasgen.status.clone().unwrap_or_default();
+
+    // Use the override if provided, otherwise fall back to CRD status
+    let status = status_override
+        .cloned()
+        .unwrap_or_else(|| sasgen.status.clone().unwrap_or_default());
 
     let secret = Secret {
         metadata: kube::api::ObjectMeta {
@@ -49,7 +54,7 @@ pub async fn ensure_secret(
             info!(%secret_name, "Secret updated successfully");
         }
         Err(kube::Error::Api(e)) if e.code == 404 => {
-            warn!(%secret_name, "Secret not found; creating new one");
+            info!(%secret_name, "Secret not found; creating new one");
             api.create(&Default::default(), &secret).await?;
             info!(%secret_name, "Secret created successfully");
         }
@@ -61,3 +66,4 @@ pub async fn ensure_secret(
 
     Ok(())
 }
+
