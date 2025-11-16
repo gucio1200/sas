@@ -77,7 +77,6 @@ pub async fn reconcile(
     let ttl_hours = sasgen.spec.sas_ttl_hours.unwrap_or(ctx.sas_ttl_hours);
 
     let mut new_status = sasgen.status.clone();
-    let mut regenerated = false;
 
     if should_regenerate(now, &sasgen.status, renewal_hours) {
         let token_info = generate_container_sas(
@@ -98,7 +97,6 @@ pub async fn reconcile(
         );
 
         update_crd_status(&sasgen, &ctx, new_status.clone().unwrap()).await?;
-        regenerated = true;
     }
 
     let target_secret = sasgen.target_secret_name(None);
