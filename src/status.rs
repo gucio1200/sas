@@ -4,6 +4,7 @@ use kube::api::{Api, Patch, PatchParams};
 use kube::ResourceExt;
 use tracing::{debug, info, instrument, warn};
 
+
 #[instrument(skip(ctx), fields(cr_name = %sasgen.name_any()))]
 pub async fn update_crd_status(
     sasgen: &SasGenerator,
@@ -11,8 +12,8 @@ pub async fn update_crd_status(
     status: SasGeneratorStatus,
 ) -> Result<(), ReconcileError> {
     let ns = sasgen.namespace().unwrap_or_else(|| "default".into());
-    let api: Api<SasGenerator> = Api::namespaced(ctx.client.clone(), &ns);
     let name = sasgen.name_any();
+    let api: Api<SasGenerator> = Api::namespaced(ctx.client.clone(), &ns);
 
     debug!(
         %name,
@@ -34,15 +35,11 @@ pub async fn update_crd_status(
 
     let params = PatchParams::apply("sas-operator").force();
 
-    match api.patch_status(&name, &params, &patch).await {
-        Ok(_) => info!(%name, "CRD status successfully updated"),
-        Err(e) => {
+    api.patch_status(&name, &params, &patch)
+        .await
+        .map(|_| info!(%name, "CRD status successfully updated"))
+        .map_err(|e| {
             warn!(%name, ?e, "Failed to update CRD status");
-            return Err(ReconcileError::CrdApply(format!(
-                "Failed to patch CRD status: {e}"
-            )));
-        }
-    }
-
-    Ok(())
+            ReconcileError::CrdApply(format!("Failed to patch CRD status: {e}"))
+        })
 }
