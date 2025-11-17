@@ -119,7 +119,7 @@ impl SasGenerator {
             .is_some();
         let expiry = self.status.as_ref().and_then(|s| s.expiry.as_ref());
 
-        info!(
+        debug!(
             crd = %cr_name,
             account = %self.spec.storage_account,
             container = %self.spec.container_name,
