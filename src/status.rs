@@ -4,7 +4,6 @@ use kube::api::{Api, Patch, PatchParams};
 use kube::ResourceExt;
 use tracing::{debug, info, instrument, warn};
 
-
 #[instrument(skip(ctx), fields(cr_name = %sasgen.name_any()))]
 pub async fn update_crd_status(
     sasgen: &SasGenerator,
